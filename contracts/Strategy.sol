@@ -73,7 +73,8 @@ contract Strategy is BaseStrategy {
     IProtocolDataProvider internal constant protocolDataProvider =
         IProtocolDataProvider(0x7551b5D2763519d4e37e8B81929D336De671d46d);
 
-    address internal constant WMATIC = 0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270;
+    address internal constant WMATIC =
+        0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270;
     address internal constant WETH = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
 
     uint256 internal minThreshold;
@@ -258,7 +259,6 @@ contract Strategy is BaseStrategy {
         )
     {
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
-
         // claim rewards from Aave's Liquidity Mining Program
         _claimRewards();
 
@@ -606,7 +606,25 @@ contract Strategy is BaseStrategy {
                 type(uint256).max,
                 address(this)
             );
+
+            // Sell reward for want
+            _sellMaticForWant(IERC20(WMATIC).balanceOf(address(this)));
         }
+    }
+
+    function _sellMaticForWant(uint256 _amount) internal {
+        if (_amount == 0) {
+            return;
+        }
+
+        _checkAllowance(address(router), address(WMATIC), _amount);
+        router.swapExactTokensForTokens(
+            _amount,
+            0,
+            getTokenOutPath(address(WMATIC), address(want)),
+            address(this),
+            now
+        );
     }
 
     function _takeLendingProfit() internal {

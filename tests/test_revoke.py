@@ -15,18 +15,18 @@ def test_revoke_strategy_from_vault(
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == 0
     amount = Wei("10 ether")
     # Deposit to the vault and harvest
-    token.approve(vault.address, amount, {"from": wmatic_whale})
+    token.approve(vault, amount, {"from": wmatic_whale})
     vault.deposit(amount, {"from": wmatic_whale})
     chain.sleep(1)
     strategy.harvest()
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == amount
 
-    vault.revokeStrategy(strategy.address, {"from": gov})
+    vault.revokeStrategy(strategy, {"from": gov})
     chain.sleep(1)
     strategy.harvest()
     assert pytest.approx(token.balanceOf(vault), rel=RELATIVE_APPROX) == amount
-    assert pytest.approx(vddai.balanceOf(strategy)/1e18, rel=RELATIVE_APPROX) == 0
-    assert pytest.approx(amwmatic.balanceOf(strategy)/1e18, rel=RELATIVE_APPROX) == 0
+    assert vddai.balanceOf(strategy) < Wei("0.5 ether")
+    assert amwmatic.balanceOf(strategy) < Wei("0.5 ether")
 
 
 def test_revoke_strategy_from_strategy(
