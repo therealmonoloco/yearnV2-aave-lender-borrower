@@ -49,11 +49,6 @@ def test_clone(
         strategy.maxGasPriceToTend(),
         {"from": strategy.strategist()},
     )
-
-    uniswap = Contract("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")
-    cloned_strategy.switchDex(True, {"from": gov})
-    assert cloned_strategy.router() == uniswap
-
     # should fail due to already initialized
     with reverts():
         strategy.initialize(vault, vault_snx, "NameRevert", {"from": gov})

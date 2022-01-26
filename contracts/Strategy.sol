@@ -67,8 +67,6 @@ contract Strategy is BaseStrategy {
     IVault public yVault;
     IERC20 internal investmentToken;
 
-    ISwap public router;
-
     // sUSD v2 Curve Pool
     IStableSwapExchange internal constant curvePool =
         IStableSwapExchange(0xA5407eAE9Ba41422680e2e00537571bcC53efBfD);
@@ -80,12 +78,8 @@ contract Strategy is BaseStrategy {
     address internal constant AAVE = 0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9;
 
     // SushiSwap router
-    ISwap internal constant sushiswapRouter =
+    ISwap internal constant router =
         ISwap(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
-
-    // Uniswap router
-    ISwap internal constant uniswapRouter =
-        ISwap(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
 
     uint256 internal minThreshold;
     uint256 public maxLoss;
@@ -159,15 +153,6 @@ contract Strategy is BaseStrategy {
         maxLoss = _maxLoss;
     }
 
-    // Allow switching between Uniswap and SushiSwap
-    function switchDex(bool isUniswap) external onlyVaultManagers {
-        if (isUniswap) {
-            router = uniswapRouter;
-        } else {
-            router = sushiswapRouter;
-        }
-    }
-
     function _initializeThis(address _yVault, string memory _strategyName)
         internal
     {
@@ -186,10 +171,6 @@ contract Strategy is BaseStrategy {
 
         variableDebtToken = IVariableDebtToken(_variableDebtToken);
         minThreshold = (10**(yVault.decimals())).div(100); // 0.01 minThreshold
-
-        // Set default router to SushiSwap
-        router = sushiswapRouter;
-
         strategyName = _strategyName;
 
         // Set health check to health.ychad.eth
@@ -877,15 +858,6 @@ contract Strategy is BaseStrategy {
         return AaveLenderBorrowerLib.toETH(_amount, asset);
     }
 
-    function ethToWant(uint256 _amtInWei)
-        public
-        view
-        override
-        returns (uint256)
-    {
-        return _fromETH(_amtInWei, address(want));
-    }
-
     function _fromETH(uint256 _amount, address asset)
         internal
         view
@@ -938,5 +910,13 @@ contract Strategy is BaseStrategy {
         view
         override
         returns (address[] memory)
+    {}
+
+    // Not using profitFactor/harvestTrigger so this is irrelevant
+    function ethToWant(uint256 _amtInWei)
+        public
+        view
+        override
+        returns (uint256)
     {}
 }
