@@ -26,6 +26,7 @@ import "./interfaces/aave/IVariableDebtToken.sol";
 import "./interfaces/aave/IProtocolDataProvider.sol";
 import "./interfaces/aave/IAaveIncentivesController.sol";
 import "./interfaces/aave/IReserveInterestRateStrategy.sol";
+import "./interfaces/curve/IStableSwapExchange.sol";
 
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -67,6 +68,10 @@ contract Strategy is BaseStrategy {
     IERC20 internal investmentToken;
 
     ISwap public router;
+
+    // sUSD v2 Curve Pool
+    IStableSwapExchange internal constant curvePool =
+        IStableSwapExchange(0xA5407eAE9Ba41422680e2e00537571bcC53efBfD);
 
     IStakedAave internal constant stkAave =
         IStakedAave(0x4da27a545c0c5B758a6BA100e3a049001de870f5);
