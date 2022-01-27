@@ -694,23 +694,23 @@ contract Strategy is BaseStrategy {
     }
 
     // ----------------- INTERNAL CALCS -----------------
-    function balanceOfWant() internal view returns (uint256) {
+    function balanceOfWant() public view returns (uint256) {
         return want.balanceOf(address(this));
     }
 
-    function balanceOfInvestmentToken() internal view returns (uint256) {
+    function balanceOfInvestmentToken() public view returns (uint256) {
         return investmentToken.balanceOf(address(this));
     }
 
-    function balanceOfIntermediateToken() internal view returns (uint256) {
+    function balanceOfIntermediateToken() public view returns (uint256) {
         return intermediateToken.balanceOf(address(this));
     }
 
-    function balanceOfAToken() internal view returns (uint256) {
+    function balanceOfAToken() public view returns (uint256) {
         return aToken.balanceOf(address(this));
     }
 
-    function balanceOfDebt() internal view returns (uint256) {
+    function balanceOfDebt() public view returns (uint256) {
         return variableDebtToken.balanceOf(address(this));
     }
 
