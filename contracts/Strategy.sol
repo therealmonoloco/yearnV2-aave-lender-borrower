@@ -95,8 +95,6 @@ contract Strategy is BaseStrategy {
         ISwap(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
 
     uint256 internal minThreshold;
-    uint256 public maxLoss;
-    uint256 public maxGasPriceToTend;
     string internal strategyName;
 
     event RepayDebt(uint256 repayAmount, uint256 previousDebtBalance);
@@ -140,9 +138,7 @@ contract Strategy is BaseStrategy {
         uint256 _maxTotalBorrowIT,
         bool _isWantIncentivised,
         bool _isInvestmentTokenIncentivised,
-        bool _leaveDebtBehind,
-        uint256 _maxLoss,
-        uint256 _maxGasPriceToTend
+        bool _leaveDebtBehind
     ) external onlyEmergencyAuthorized {
         require(
             _warningLTVMultiplier <= MAX_MULTIPLIER &&
@@ -156,10 +152,6 @@ contract Strategy is BaseStrategy {
         isWantIncentivised = _isWantIncentivised;
         isInvestmentTokenIncentivised = _isInvestmentTokenIncentivised;
         leaveDebtBehind = _leaveDebtBehind;
-        maxGasPriceToTend = _maxGasPriceToTend;
-
-        require(_maxLoss <= 10_000);
-        maxLoss = _maxLoss;
     }
 
     function _initializeThis(address _yVault, string memory _strategyName)
@@ -489,8 +481,7 @@ contract Strategy is BaseStrategy {
                 targetLTV,
                 warningLTV,
                 totalCollateralETH,
-                totalDebtETH,
-                maxGasPriceToTend
+                totalDebtETH
             );
     }
 
