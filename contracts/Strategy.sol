@@ -67,9 +67,22 @@ contract Strategy is BaseStrategy {
     IVault public yVault;
     IERC20 internal investmentToken;
 
+    // Use Dai as intermediate token
+    IERC20 public intermediateToken =
+        IERC20(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+
     // sUSD v2 Curve Pool
     IStableSwapExchange internal constant curvePool =
         IStableSwapExchange(0xA5407eAE9Ba41422680e2e00537571bcC53efBfD);
+
+    // sUSD index
+    int128 wantCurveIndex = 3;
+
+    // Dai index
+    int128 intermediateCurveIndex = 0;
+
+    // Sanity check to avoid getting rekt swapping capital
+    uint256 public minExpectedSwapPercentage = 9900;
 
     IStakedAave internal constant stkAave =
         IStakedAave(0x4da27a545c0c5B758a6BA100e3a049001de870f5);
@@ -161,8 +174,12 @@ contract Strategy is BaseStrategy {
 
         yVault = IVault(_yVault);
         investmentToken = IERC20(IVault(_yVault).token());
+
+        // aToken is the intermediate and not want (e.g: Dai instead of sUSD)
         (address _aToken, , ) =
-            _protocolDataProvider().getReserveTokensAddresses(address(want));
+            _protocolDataProvider().getReserveTokensAddresses(
+                address(intermediateToken)
+            );
         aToken = IAToken(_aToken);
         (, , address _variableDebtToken) =
             _protocolDataProvider().getReserveTokensAddresses(
@@ -205,9 +222,6 @@ contract Strategy is BaseStrategy {
         // claim rewards from Aave's Liquidity Mining Program
         _claimRewards();
 
-        // claim rewards from yVault
-        _takeVaultProfit();
-
         uint256 totalAssetsAfterProfit = estimatedTotalAssets();
 
         _profit = totalAssetsAfterProfit > totalDebt
@@ -244,7 +258,7 @@ contract Strategy is BaseStrategy {
         // NOTE: we do not skip the rest of the function if we don't as it may need to repay or take on more debt
         if (wantBalance > _debtOutstanding) {
             uint256 amountToDeposit = wantBalance.sub(_debtOutstanding);
-            _depositToAave(amountToDeposit);
+            convertAndDepositToAave(amountToDeposit);
         }
 
         // NOTE: debt + collateral calcs are done in ETH
@@ -674,14 +688,37 @@ contract Strategy is BaseStrategy {
             );
     }
 
-    function _depositToAave(uint256 amount) internal {
+    function convertAndDepositToAave(uint256 amount)
+        public
+        onlyEmergencyAuthorized
+    {
         if (amount == 0) {
             return;
         }
 
+        _checkAllowance(address(curvePool), address(want), amount);
+        curvePool.exchange_underlying(
+            wantCurveIndex,
+            intermediateCurveIndex,
+            amount,
+            amount.mul(minExpectedSwapPercentage).div(MAX_BPS)
+        );
+
+        uint256 intermediateBalance =
+            intermediateToken.balanceOf(address(this));
+
         ILendingPool lp = _lendingPool();
-        _checkAllowance(address(lp), address(want), amount);
-        lp.deposit(address(want), amount, address(this), referral);
+        _checkAllowance(
+            address(lp),
+            address(intermediateToken),
+            intermediateBalance
+        );
+        lp.deposit(
+            address(intermediateToken),
+            intermediateBalance,
+            address(this),
+            referral
+        );
     }
 
     function _checkCooldown() internal view returns (bool) {
@@ -701,25 +738,6 @@ contract Strategy is BaseStrategy {
         if (IERC20(_token).allowance(address(this), _contract) < _amount) {
             IERC20(_token).safeApprove(_contract, 0);
             IERC20(_token).safeApprove(_contract, type(uint256).max);
-        }
-    }
-
-    function _takeVaultProfit() internal {
-        uint256 _debt = balanceOfDebt();
-        uint256 _valueInVault = _valueOfInvestment();
-        if (_debt >= _valueInVault) {
-            return;
-        }
-
-        uint256 profit = _valueInVault.sub(_debt);
-        uint256 ySharesToWithdraw = _investmentTokenToYShares(profit);
-        if (ySharesToWithdraw > 0) {
-            yVault.withdraw(ySharesToWithdraw, address(this), maxLoss);
-            _sellAForB(
-                balanceOfInvestmentToken(),
-                address(investmentToken),
-                address(want)
-            );
         }
     }
 
