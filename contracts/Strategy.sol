@@ -104,7 +104,26 @@ contract Strategy is BaseStrategy {
         address _yVault,
         string memory _strategyName
     ) public BaseStrategy(_vault) {
-        _initializeThis(_yVault, _strategyName);
+        yVault = IVault(_yVault);
+        investmentToken = IERC20(IVault(_yVault).token());
+
+        // aToken is the intermediate and not want (e.g: Dai instead of sUSD)
+        (address _aToken, , ) =
+            _protocolDataProvider().getReserveTokensAddresses(
+                address(intermediateToken)
+            );
+        aToken = IAToken(_aToken);
+        (, , address _variableDebtToken) =
+            _protocolDataProvider().getReserveTokensAddresses(
+                address(investmentToken)
+            );
+
+        variableDebtToken = IVariableDebtToken(_variableDebtToken);
+        minThreshold = (10**(yVault.decimals())).div(100); // 0.01 minThreshold
+        strategyName = _strategyName;
+
+        // Set health check to health.ychad.eth
+        healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
     }
 
     // ----------------- PUBLIC VIEW FUNCTIONS -----------------
@@ -152,47 +171,6 @@ contract Strategy is BaseStrategy {
         isWantIncentivised = _isWantIncentivised;
         isInvestmentTokenIncentivised = _isInvestmentTokenIncentivised;
         leaveDebtBehind = _leaveDebtBehind;
-    }
-
-    function _initializeThis(address _yVault, string memory _strategyName)
-        internal
-    {
-        // Make sure we only initialize one time
-        require(address(yVault) == address(0)); // dev: strategy already initialized
-
-        yVault = IVault(_yVault);
-        investmentToken = IERC20(IVault(_yVault).token());
-
-        // aToken is the intermediate and not want (e.g: Dai instead of sUSD)
-        (address _aToken, , ) =
-            _protocolDataProvider().getReserveTokensAddresses(
-                address(intermediateToken)
-            );
-        aToken = IAToken(_aToken);
-        (, , address _variableDebtToken) =
-            _protocolDataProvider().getReserveTokensAddresses(
-                address(investmentToken)
-            );
-
-        variableDebtToken = IVariableDebtToken(_variableDebtToken);
-        minThreshold = (10**(yVault.decimals())).div(100); // 0.01 minThreshold
-        strategyName = _strategyName;
-
-        // Set health check to health.ychad.eth
-        healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
-    }
-
-    function initialize(
-        address _vault,
-        address _yVault,
-        string memory _strategyName
-    ) public {
-        // Make sure we only initialize one time
-        require(address(yVault) == address(0)); // dev: strategy already initialized
-
-        address sender = msg.sender;
-        _initialize(_vault, sender, sender, sender);
-        _initializeThis(_yVault, _strategyName);
     }
 
     // ----------------- MAIN STRATEGY FUNCTIONS -----------------
