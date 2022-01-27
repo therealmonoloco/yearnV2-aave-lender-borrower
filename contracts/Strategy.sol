@@ -527,10 +527,10 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    //withdraw an amount including any want balance
-    function withdrawFromAaveAndConvert(uint256 amount)
+    function withdrawFromAave(uint256 amount)
         public
         onlyEmergencyAuthorized
+        returns (uint256)
     {
         uint256 balanceUnderlying = balanceOfAToken();
         if (amount > balanceUnderlying) {
@@ -545,7 +545,7 @@ contract Strategy is BaseStrategy {
 
         uint256 toWithdraw = Math.min(amount, maxWithdrawal);
         if (toWithdraw == 0) {
-            return;
+            return 0;
         }
 
         _checkAllowance(address(_lendingPool()), address(aToken), toWithdraw);
@@ -555,6 +555,15 @@ contract Strategy is BaseStrategy {
             address(this)
         );
 
+        return toWithdraw;
+    }
+
+    //withdraw an amount including any want balance
+    function withdrawFromAaveAndConvert(uint256 amount)
+        public
+        onlyEmergencyAuthorized
+    {
+        uint256 toWithdraw = withdrawFromAave(amount);
         exchangeUnderlyingOnCurve(
             intermediateCurveIndex,
             wantCurveIndex,
