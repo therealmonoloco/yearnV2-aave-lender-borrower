@@ -634,6 +634,19 @@ contract Strategy is BaseStrategy {
             );
     }
 
+    function depositIntermediateTokenToAave(uint256 amount)
+        public
+        onlyEmergencyAuthorized
+    {
+        if (amount == 0) {
+            return;
+        }
+
+        ILendingPool lp = _lendingPool();
+        _checkAllowance(address(lp), address(intermediateToken), amount);
+        lp.deposit(address(intermediateToken), amount, address(this), referral);
+    }
+
     function convertAndDepositToAave(uint256 amount)
         public
         onlyEmergencyAuthorized
@@ -648,21 +661,7 @@ contract Strategy is BaseStrategy {
             amount
         );
 
-        uint256 intermediateBalance =
-            intermediateToken.balanceOf(address(this));
-
-        ILendingPool lp = _lendingPool();
-        _checkAllowance(
-            address(lp),
-            address(intermediateToken),
-            intermediateBalance
-        );
-        lp.deposit(
-            address(intermediateToken),
-            intermediateBalance,
-            address(this),
-            referral
-        );
+        depositIntermediateTokenToAave(balanceOfIntermediateToken());
     }
 
     function _checkCooldown() internal view returns (bool) {
