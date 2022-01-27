@@ -44,9 +44,6 @@ contract Strategy is BaseStrategy {
     bool public isWantIncentivised;
     bool public isInvestmentTokenIncentivised;
 
-    // if set to true, the strategy will not try to repay debt by selling want
-    bool public leaveDebtBehind;
-
     // Aave's referral code
     uint16 internal referral;
 
@@ -157,8 +154,7 @@ contract Strategy is BaseStrategy {
         uint16 _aaveReferral,
         uint256 _maxTotalBorrowIT,
         bool _isWantIncentivised,
-        bool _isInvestmentTokenIncentivised,
-        bool _leaveDebtBehind
+        bool _isInvestmentTokenIncentivised
     ) external onlyEmergencyAuthorized {
         require(
             _warningLTVMultiplier <= MAX_MULTIPLIER &&
@@ -171,7 +167,6 @@ contract Strategy is BaseStrategy {
         referral = _aaveReferral;
         isWantIncentivised = _isWantIncentivised;
         isInvestmentTokenIncentivised = _isInvestmentTokenIncentivised;
-        leaveDebtBehind = _leaveDebtBehind;
     }
 
     // ----------------- MAIN STRATEGY FUNCTIONS -----------------
@@ -346,7 +341,7 @@ contract Strategy is BaseStrategy {
 
             uint256 amountToRepayIT =
                 _fromETH(amountToRepayETH, address(investmentToken));
-            _buyInvestmentTokenWithWant(amountToRepayIT);
+            buyInvestmentTokenWithWant(amountToRepayIT);
             repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
         }
 
@@ -397,31 +392,6 @@ contract Strategy is BaseStrategy {
 
         // it will return the free amount of want
         withdrawFromAaveAndConvert(_amountNeeded);
-
-        balance = balanceOfWant();
-        // we check if we withdrew less than expected AND should buy investmentToken with want (realising losses)
-        if (
-            _amountNeeded > balance &&
-            balanceOfDebt() > 0 && // still some debt remaining
-            balanceOfInvestmentToken() == 0 && // but no capital to repay
-            !leaveDebtBehind // if set to true, the strategy will not try to repay debt by selling want
-        ) {
-            // using this part of code will result in losses but it is necessary to unlock full collateral in case of wind down
-            // we calculate how much want we need to fulfill the want request
-            uint256 remainingAmountWant = _amountNeeded.sub(balance);
-            // then calculate how much InvestmentToken we need to unlock collateral
-            amountToRepayIT = _calculateAmountToRepay(remainingAmountWant);
-
-            // we buy investmentToken with Want
-            _buyInvestmentTokenWithWant(amountToRepayIT);
-
-            // we repay debt to actually unlock collateral
-            // after this, balanceOfDebt should be 0
-            repayInvestmentTokenDebt(amountToRepayIT);
-
-            // then we try withdraw once more
-            withdrawFromAaveAndConvert(remainingAmountWant);
-        }
 
         uint256 totalAssets = balanceOfWant();
         if (_amountNeeded > totalAssets) {
@@ -800,16 +770,33 @@ contract Strategy is BaseStrategy {
         );
     }
 
-    function _buyInvestmentTokenWithWant(uint256 _amount) internal {
+    function buyInvestmentTokenWithWant(uint256 _amount)
+        public
+        onlyEmergencyAuthorized
+    {
         if (_amount == 0 || address(investmentToken) == address(want)) {
             return;
         }
 
-        _checkAllowance(address(router), address(want), _amount);
+        // sUSD -> ETH liquidity sucks badly so have to go through Dai
+        exchangeUnderlyingOnCurve(
+            wantCurveIndex,
+            intermediateCurveIndex,
+            balanceOfWant()
+        );
+
+        _checkAllowance(
+            address(router),
+            address(intermediateToken),
+            balanceOfIntermediateToken()
+        );
         router.swapTokensForExactTokens(
             _amount,
             type(uint256).max,
-            getTokenOutPath(address(want), address(investmentToken)),
+            getTokenOutPath(
+                address(intermediateToken),
+                address(investmentToken)
+            ),
             address(this),
             now
         );
