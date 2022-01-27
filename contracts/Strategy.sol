@@ -120,12 +120,8 @@ contract Strategy is BaseStrategy {
         return
             balanceOfWant() // balance of want
                 .add(balanceOfAToken()) // asset suplied as collateral
-                .add(
-                _fromETH(
-                    _toETH(_valueOfInvestment(), address(investmentToken)),
-                    address(want)
-                )
-            ) // current value of assets deposited in vault
+                .add(balanceOfIntermediateToken()) // assume units are comparable (1 dai = 1 susd)
+            // current value of assets deposited in vault
                 .sub(
                 _fromETH(
                     _toETH(balanceOfDebt(), address(investmentToken)),
@@ -379,8 +375,9 @@ contract Strategy is BaseStrategy {
 
             uint256 amountToRepayIT =
                 _fromETH(amountToRepayETH, address(investmentToken));
-            uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from investmentToken vault
-            _repayInvestmentTokenDebt(withdrawnIT); // we repay the investmentToken debt with Aave
+            // TODO: withdraw if deposited or convert as needed
+            // uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from investmentToken vault
+            repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
         }
 
         uint256 balanceIT = balanceOfInvestmentToken();
@@ -419,18 +416,19 @@ contract Strategy is BaseStrategy {
 
         // We first repay whatever we need to repay to keep healthy ratios
         uint256 amountToRepayIT = _calculateAmountToRepay(_amountNeeded);
-        uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from investmentToken vault
-        _repayInvestmentTokenDebt(withdrawnIT); // we repay the investmentToken debt with Aave
+        // TODO: withdraw if deposited or convert as needed
+        // uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from investmentToken vault
+        repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
 
         // it will return the free amount of want
-        _withdrawWantFromAave(_amountNeeded);
+        withdrawFromAaveAndConvert(_amountNeeded);
 
         balance = balanceOfWant();
         // we check if we withdrew less than expected AND should buy investmentToken with want (realising losses)
         if (
             _amountNeeded > balance &&
             balanceOfDebt() > 0 && // still some debt remaining
-            balanceOfInvestmentToken().add(_valueOfInvestment()) == 0 && // but no capital to repay
+            balanceOfInvestmentToken() == 0 && // but no capital to repay
             !leaveDebtBehind // if set to true, the strategy will not try to repay debt by selling want
         ) {
             // using this part of code will result in losses but it is necessary to unlock full collateral in case of wind down
@@ -444,10 +442,10 @@ contract Strategy is BaseStrategy {
 
             // we repay debt to actually unlock collateral
             // after this, balanceOfDebt should be 0
-            _repayInvestmentTokenDebt(amountToRepayIT);
+            repayInvestmentTokenDebt(amountToRepayIT);
 
             // then we try withdraw once more
-            _withdrawWantFromAave(remainingAmountWant);
+            withdrawFromAaveAndConvert(remainingAmountWant);
         }
 
         uint256 totalAssets = balanceOfWant();
@@ -459,31 +457,8 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function delegatedAssets() external view override returns (uint256) {
-        // returns total debt borrowed in want (which is the delegatedAssets)
-        return
-            _fromETH(
-                _toETH(balanceOfDebt(), address(investmentToken)),
-                address(want)
-            );
-    }
-
     function prepareMigration(address _newStrategy) internal override {
         // nothing to do since debt cannot be migrated
-    }
-
-    function harvestTrigger(uint256 callCost)
-        public
-        view
-        override
-        returns (bool)
-    {
-        // we harvest if:
-        // 1. stakedAave is ready to be converted to Aave and sold
-
-        return
-            _checkCooldown() ||
-            super.harvestTrigger(_fromETH(callCost, address(want)));
     }
 
     function tendTrigger(uint256 callCost) public view override returns (bool) {
@@ -521,25 +496,10 @@ contract Strategy is BaseStrategy {
 
     // ----------------- INTERNAL FUNCTIONS SUPPORT -----------------
 
-    function _withdrawFromYVault(uint256 _amountIT) internal returns (uint256) {
-        if (_amountIT == 0) {
-            return 0;
-        }
-        // no need to check allowance bc the contract == token
-        uint256 balancePrior = balanceOfInvestmentToken();
-        uint256 sharesToWithdraw =
-            Math.min(
-                _investmentTokenToYShares(_amountIT),
-                yVault.balanceOf(address(this))
-            );
-        if (sharesToWithdraw == 0) {
-            return 0;
-        }
-        yVault.withdraw(sharesToWithdraw, address(this), maxLoss);
-        return balanceOfInvestmentToken().sub(balancePrior);
-    }
-
-    function _repayInvestmentTokenDebt(uint256 amount) internal {
+    function repayInvestmentTokenDebt(uint256 amount)
+        public
+        onlyEmergencyAuthorized
+    {
         if (amount == 0) {
             return;
         }
@@ -624,24 +584,44 @@ contract Strategy is BaseStrategy {
     }
 
     //withdraw an amount including any want balance
-    function _withdrawWantFromAave(uint256 amount) internal {
+    function withdrawFromAaveAndConvert(uint256 amount)
+        public
+        onlyEmergencyAuthorized
+    {
         uint256 balanceUnderlying = balanceOfAToken();
         if (amount > balanceUnderlying) {
             amount = balanceUnderlying;
         }
 
         uint256 maxWithdrawal =
-            Math.min(_maxWithdrawal(), want.balanceOf(address(aToken)));
+            Math.min(
+                _maxWithdrawal(),
+                intermediateToken.balanceOf(address(aToken))
+            );
 
         uint256 toWithdraw = Math.min(amount, maxWithdrawal);
-        if (toWithdraw > 0) {
-            _checkAllowance(
-                address(_lendingPool()),
-                address(aToken),
-                toWithdraw
-            );
-            _lendingPool().withdraw(address(want), toWithdraw, address(this));
+        if (toWithdraw == 0) {
+            return;
         }
+
+        _checkAllowance(address(_lendingPool()), address(aToken), toWithdraw);
+        _lendingPool().withdraw(
+            address(intermediateToken),
+            toWithdraw,
+            address(this)
+        );
+
+        _checkAllowance(
+            address(curvePool),
+            address(intermediateToken),
+            toWithdraw
+        );
+        curvePool.exchange_underlying(
+            intermediateCurveIndex,
+            wantCurveIndex,
+            toWithdraw,
+            toWithdraw.mul(minExpectedSwapPercentage).div(MAX_BPS)
+        );
     }
 
     function _maxWithdrawal() internal view returns (uint256) {
@@ -653,7 +633,10 @@ contract Strategy is BaseStrategy {
             return 0;
         }
         return
-            _fromETH(totalCollateralETH.sub(minCollateralETH), address(want));
+            _fromETH(
+                totalCollateralETH.sub(minCollateralETH),
+                address(intermediateToken)
+            );
     }
 
     function _calculateAmountToRepay(uint256 amount)
@@ -675,7 +658,7 @@ contract Strategy is BaseStrategy {
         ) = _getAaveUserAccountData();
         uint256 warningLTV = _getWarningLTV(currentLiquidationThreshold);
         uint256 targetLTV = _getTargetLTV(currentLiquidationThreshold);
-        uint256 amountETH = _toETH(amount, address(want));
+        uint256 amountETH = _toETH(amount, address(intermediateToken));
         return
             AaveLenderBorrowerLib.calculateAmountToRepay(
                 amountETH,
@@ -750,27 +733,16 @@ contract Strategy is BaseStrategy {
         return investmentToken.balanceOf(address(this));
     }
 
+    function balanceOfIntermediateToken() internal view returns (uint256) {
+        return intermediateToken.balanceOf(address(this));
+    }
+
     function balanceOfAToken() internal view returns (uint256) {
         return aToken.balanceOf(address(this));
     }
 
     function balanceOfDebt() internal view returns (uint256) {
         return variableDebtToken.balanceOf(address(this));
-    }
-
-    function _valueOfInvestment() internal view returns (uint256) {
-        return
-            yVault.balanceOf(address(this)).mul(yVault.pricePerShare()).div(
-                10**yVault.decimals()
-            );
-    }
-
-    function _investmentTokenToYShares(uint256 amount)
-        internal
-        view
-        returns (uint256)
-    {
-        return amount.mul(10**yVault.decimals()).div(yVault.pricePerShare());
     }
 
     function _getAaveUserAccountData()
