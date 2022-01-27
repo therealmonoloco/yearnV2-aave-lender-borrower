@@ -134,6 +134,7 @@ contract Strategy is BaseStrategy {
 
     function estimatedTotalAssets() public view override returns (uint256) {
         // not taking into account aave rewards (they are staked and not accesible)
+        // this assumes want and intermediate token have same number of decimals
         return
             balanceOfWant() // balance of want
                 .add(balanceOfAToken()) // asset suplied as collateral
@@ -345,20 +346,24 @@ contract Strategy is BaseStrategy {
 
             uint256 amountToRepayIT =
                 _fromETH(amountToRepayETH, address(investmentToken));
-            // TODO: withdraw if deposited or convert as needed
-            // uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from investmentToken vault
+            _buyInvestmentTokenWithWant(amountToRepayIT);
             repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
         }
 
+        // Convert all WETH to sUSD
         uint256 balanceIT = balanceOfInvestmentToken();
         if (balanceIT > 0) {
-            _checkAllowance(
-                address(yVault),
+            // Selling ETH->sUSD via Dai because liquidity sucks hard
+            _sellAForB(
+                balanceIT,
                 address(investmentToken),
-                balanceIT
+                address(intermediateToken)
             );
-
-            yVault.deposit();
+            exchangeUnderlyingOnCurve(
+                intermediateCurveIndex,
+                wantCurveIndex,
+                balanceOfIntermediateToken()
+            );
         }
     }
 
@@ -580,16 +585,26 @@ contract Strategy is BaseStrategy {
             address(this)
         );
 
-        _checkAllowance(
-            address(curvePool),
-            address(intermediateToken),
-            toWithdraw
-        );
-        curvePool.exchange_underlying(
+        exchangeUnderlyingOnCurve(
             intermediateCurveIndex,
             wantCurveIndex,
-            toWithdraw,
-            toWithdraw.mul(minExpectedSwapPercentage).div(MAX_BPS)
+            toWithdraw
+        );
+    }
+
+    function exchangeUnderlyingOnCurve(
+        int128 from,
+        int128 to,
+        uint256 amount
+    ) public onlyEmergencyAuthorized {
+        _checkAllowance(address(curvePool), address(want), amount);
+        _checkAllowance(address(curvePool), address(intermediateToken), amount);
+
+        curvePool.exchange_underlying(
+            from,
+            to,
+            amount,
+            amount.mul(minExpectedSwapPercentage).div(MAX_BPS)
         );
     }
 
@@ -648,12 +663,10 @@ contract Strategy is BaseStrategy {
             return;
         }
 
-        _checkAllowance(address(curvePool), address(want), amount);
-        curvePool.exchange_underlying(
+        exchangeUnderlyingOnCurve(
             wantCurveIndex,
             intermediateCurveIndex,
-            amount,
-            amount.mul(minExpectedSwapPercentage).div(MAX_BPS)
+            amount
         );
 
         uint256 intermediateBalance =
