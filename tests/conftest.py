@@ -113,6 +113,7 @@ addresses = {
     "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # USDT
     "DAI": "0x6B175474E89094C44Da98b954EedeAC495271d0F",  # DAI
     "USDC": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # USDC
+    "SUSD": "0x57Ab1ec28D129707052df4dF418D58a2D46d5f51",  # SUSD
 }
 
 
@@ -123,7 +124,8 @@ addresses = {
         # "WETH",  # WETH
         # 'LINK', # LINK
         # 'USDT', # USDT
-        "DAI"
+        # "DAI"
+        "SUSD"
     ]
 )
 def token(request):
@@ -133,11 +135,11 @@ def token(request):
 @pytest.fixture(
     params=[
         # "yvWBTC", # yvWBTC
-        # "yvWETH", # yvWETH
+        "yvWETH",  # yvWETH
         # "yvUSDT",  # yvUSDT
         # "yvUSDC", # yvUSDC
         # "yvDAI" # yvDAI
-        "yvSUSD"
+        # "yvSUSD"
     ],
 )
 def yvault(request):
@@ -219,7 +221,7 @@ def vault(pm, gov, rewards, guardian, management, token):
 
 incentivised = {
     "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599": True,  # WBTC
-    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": True,  # WETH
+    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": False,  # WETH
     "0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e": False,  # YFI
     "0x514910771AF9Ca656af840dff83E8264EcF986CA": False,  # LINK
     "0x6B175474E89094C44Da98b954EedeAC495271d0F": True,  # DAI
@@ -240,8 +242,9 @@ def borrow_incentivised(borrow_token):
 
 
 @pytest.fixture
-def strategy(vault, Strategy, gov, cloner):
-    strategy = Strategy.at(cloner.original())
+def strategy(strategist, keeper, vault, yvault, Strategy, gov):
+    strategy = strategist.deploy(Strategy, vault, yvault, "StrategySUSDDirtyLeverager")
+    strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     chain.mine()
     yield strategy
@@ -250,26 +253,3 @@ def strategy(vault, Strategy, gov, cloner):
 @pytest.fixture
 def RELATIVE_APPROX():
     yield 1e-5
-
-
-@pytest.fixture
-def cloner(
-    strategist,
-    vault,
-    AaveLenderBorrowerCloner,
-    yvault,
-    token_incentivised,
-    borrow_incentivised,
-    token,
-    borrow_token,
-):
-    cloner = strategist.deploy(
-        AaveLenderBorrowerCloner,
-        vault,
-        yvault,
-        token_incentivised,
-        borrow_incentivised,
-        f"Strategy{token.symbol()}Lender{borrow_token.symbol()}Borrower",
-    )
-
-    yield cloner
