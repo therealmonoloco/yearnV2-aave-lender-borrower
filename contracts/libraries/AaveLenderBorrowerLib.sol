@@ -9,7 +9,6 @@ import "../interfaces/aave/IStakedAave.sol";
 import "../interfaces/aave/IPriceOracle.sol";
 import "../interfaces/aave/IAToken.sol";
 import "../interfaces/aave/IVariableDebtToken.sol";
-import "../interfaces/IBaseFee.sol";
 import "../interfaces/IOptionalERC20.sol";
 
 import "../interfaces/aave/IProtocolDataProvider.sol";
@@ -38,8 +37,6 @@ library AaveLenderBorrowerLib {
     }
 
     uint256 internal constant MAX_BPS = 10_000;
-    IBaseFee internal constant baseFeeProvider =
-        IBaseFee(0xf8d0Ec04e94296773cE20eFbeeA82e76220cD549);
     IProtocolDataProvider public constant protocolDataProvider =
         IProtocolDataProvider(0x057835Ad21a177dbdd3090bB1CAE03EaCF78Fc6d);
 
@@ -261,8 +258,7 @@ library AaveLenderBorrowerLib {
         uint256 targetLTV,
         uint256 warningLTV,
         uint256 totalCollateralETH,
-        uint256 totalDebtETH,
-        uint256 maxGasPriceToTend
+        uint256 totalDebtETH
     ) external view returns (bool) {
         uint256 currentLTV = totalDebtETH.mul(MAX_BPS).div(totalCollateralETH);
 
@@ -280,7 +276,7 @@ library AaveLenderBorrowerLib {
                 targetLTV.sub(currentLTV) > 1000) || // WE NEED TO TAKE ON MORE DEBT (we need a 10p.p (1000bps) difference)
             (currentProtocolDebt > maxProtocolDebt) // UNHEALTHY BORROWING COSTS
         ) {
-            return baseFeeProvider.basefee_global() <= maxGasPriceToTend;
+            return true;
         }
 
         // no call to super.tendTrigger as it would return false
