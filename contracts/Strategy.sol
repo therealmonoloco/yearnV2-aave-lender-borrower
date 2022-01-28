@@ -204,17 +204,9 @@ contract Strategy is BaseStrategy {
         _debtPayment = Math.min(_debtOutstanding, _amountFreed);
 
         if (_loss > _profit) {
-            // Example:
-            // debtOutstanding 100, profit 50, _amountFreed 100, _loss 50
-            // loss should be 0, (50-50)
-            // profit should endup in 0
             _loss = _loss.sub(_profit);
             _profit = 0;
         } else {
-            // Example:
-            // debtOutstanding 100, profit 50, _amountFreed 140, _loss 10
-            // _profit should be 40, (50 profit - 10 loss)
-            // loss should end up in be 0
             _profit = _profit.sub(_loss);
             _loss = 0;
         }
@@ -223,8 +215,6 @@ contract Strategy is BaseStrategy {
     function adjustPosition(uint256 _debtOutstanding) internal override {
         uint256 wantBalance = balanceOfWant();
 
-        // if we have enough want to deposit more into Aave, we do
-        // NOTE: we do not skip the rest of the function if we don't as it may need to repay or take on more debt
         if (wantBalance > _debtOutstanding) {
             uint256 amountToDeposit = wantBalance.sub(_debtOutstanding);
             convertAndDepositToAave(amountToDeposit);
@@ -299,57 +289,10 @@ contract Strategy is BaseStrategy {
                     : 0;
             }
 
-            // convert to InvestmentToken
+            // convert to InvestmentToken and borrow
             uint256 amountToBorrowIT =
                 _fromETH(amountToBorrowETH, address(investmentToken));
-
-            if (amountToBorrowIT > 0) {
-                _lendingPool().borrow(
-                    address(investmentToken),
-                    amountToBorrowIT,
-                    2,
-                    referral,
-                    address(this)
-                );
-            }
-        } else if (
-            currentLTV > warningLTV || currentProtocolDebt > maxProtocolDebt
-        ) {
-            // UNHEALTHY RATIO
-            // we may be in this case if the current cost of capital is higher than our max cost of capital
-            // we repay debt to set it to targetLTV
-            uint256 targetDebtETH =
-                targetLTV.mul(totalCollateralETH).div(MAX_BPS);
-            uint256 amountToRepayETH =
-                targetDebtETH < totalDebtETH
-                    ? totalDebtETH.sub(targetDebtETH)
-                    : 0;
-
-            if (maxProtocolDebt == 0) {
-                amountToRepayETH = totalDebtETH;
-            } else if (currentProtocolDebt > maxProtocolDebt) {
-                // NOTE: take into account that we are withdrawing from yvVault which might have a GenLender lending to Aave
-                // REPAY = (currentProtocolDebt - maxProtocolDebt) / (1 - TargetUtilisation)
-                // coming from
-                // TargetUtilisation = (totalDebt - REPAY) / (currentLiquidity - REPAY)
-                // currentLiquidity = maxProtocolDebt / TargetUtilisation
-
-                uint256 iterativeRepayAmountETH =
-                    currentProtocolDebt
-                        .sub(maxProtocolDebt)
-                        .mul(WadRayMath.RAY)
-                        .div(uint256(WadRayMath.RAY).sub(targetUtilisationRay));
-                amountToRepayETH = Math.max(
-                    amountToRepayETH,
-                    iterativeRepayAmountETH
-                );
-            }
-            emit RepayDebt(amountToRepayETH, totalDebtETH);
-
-            uint256 amountToRepayIT =
-                _fromETH(amountToRepayETH, address(investmentToken));
-            buyInvestmentTokenWithWant(amountToRepayIT);
-            repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
+            borrowFromAave(amountToBorrowIT);
         }
 
         // Remaining amount is in investment token
@@ -363,29 +306,12 @@ contract Strategy is BaseStrategy {
         (_amountFreed, ) = liquidatePosition(estimatedTotalAssets());
     }
 
+    // Should free funds before this is called unless you want to report a loss
     function liquidatePosition(uint256 _amountNeeded)
         internal
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
-        uint256 balance = balanceOfWant();
-        // if we have enough want to take care of the liquidatePosition without actually liquidating positons
-        if (balance >= _amountNeeded) {
-            return (_amountNeeded, 0);
-        }
-        // NOTE: amountNeeded is in want
-        // NOTE: repayment amount is in investmentToken
-        // NOTE: collateral and debt calcs are done in ETH (always, see Aave docs)
-
-        // We first repay whatever we need to repay to keep healthy ratios
-        uint256 amountToRepayIT = _calculateAmountToRepay(_amountNeeded);
-        // TODO: withdraw if deposited or convert as needed
-        // uint256 withdrawnIT = _withdrawFromYVault(amountToRepayIT); // we withdraw from investmentToken vault
-        repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
-
-        // it will return the free amount of want
-        withdrawFromAaveAndConvert(_amountNeeded);
-
         uint256 totalAssets = balanceOfWant();
         if (_amountNeeded > totalAssets) {
             _liquidatedAmount = totalAssets;
@@ -517,6 +443,21 @@ contract Strategy is BaseStrategy {
             ) {
                 stkAave.cooldown();
             }
+        }
+    }
+
+    function borrowFromAave(uint256 amountToBorrowIT)
+        public
+        onlyEmergencyAuthorized
+    {
+        if (amountToBorrowIT > 0) {
+            _lendingPool().borrow(
+                address(investmentToken),
+                amountToBorrowIT,
+                2,
+                referral,
+                address(this)
+            );
         }
     }
 
@@ -766,38 +707,6 @@ contract Strategy is BaseStrategy {
             _amount,
             0,
             getTokenOutPath(tokenA, tokenB),
-            address(this),
-            now
-        );
-    }
-
-    function buyInvestmentTokenWithWant(uint256 _amount)
-        public
-        onlyEmergencyAuthorized
-    {
-        if (_amount == 0 || address(investmentToken) == address(want)) {
-            return;
-        }
-
-        // sUSD -> ETH liquidity sucks badly so have to go through Dai
-        exchangeUnderlyingOnCurve(
-            wantCurveIndex,
-            intermediateCurveIndex,
-            balanceOfWant()
-        );
-
-        _checkAllowance(
-            address(router),
-            address(intermediateToken),
-            balanceOfIntermediateToken()
-        );
-        router.swapTokensForExactTokens(
-            _amount,
-            type(uint256).max,
-            getTokenOutPath(
-                address(intermediateToken),
-                address(investmentToken)
-            ),
             address(this),
             now
         );
