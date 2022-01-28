@@ -146,6 +146,13 @@ contract Strategy is BaseStrategy {
     }
 
     // ----------------- SETTERS -----------------
+    function setMinExpectedSwapPercentage(uint256 _minExpectedSwapPercentage)
+        external
+        onlyEmergencyAuthorized
+    {
+        minExpectedSwapPercentage = _minExpectedSwapPercentage;
+    }
+
     // we put all together to save contract bytecode (!)
     function setStrategyParams(
         uint16 _targetLTVMultiplier,
@@ -345,21 +352,7 @@ contract Strategy is BaseStrategy {
             repayInvestmentTokenDebt(amountToRepayIT); // we repay the investmentToken debt with Aave
         }
 
-        // Convert all WETH to sUSD
-        uint256 balanceIT = balanceOfInvestmentToken();
-        if (balanceIT > 0) {
-            // Selling ETH->sUSD via Dai because liquidity sucks hard
-            _sellAForB(
-                balanceIT,
-                address(investmentToken),
-                address(intermediateToken)
-            );
-            exchangeUnderlyingOnCurve(
-                intermediateCurveIndex,
-                wantCurveIndex,
-                balanceOfIntermediateToken()
-            );
-        }
+        // Remaining amount is in investment token
     }
 
     function liquidateAllPositions()
@@ -485,7 +478,7 @@ contract Strategy is BaseStrategy {
             // a minimum balance of 0.01 AAVE is required
             uint256 aaveBalance = IERC20(AAVE).balanceOf(address(this));
             if (aaveBalance > 1e15) {
-                _sellAForB(aaveBalance, address(AAVE), address(want));
+                sellAForB(aaveBalance, address(AAVE), address(want));
             }
 
             // claim rewards
@@ -759,11 +752,11 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    function _sellAForB(
+    function sellAForB(
         uint256 _amount,
         address tokenA,
         address tokenB
-    ) internal {
+    ) public onlyEmergencyAuthorized {
         if (_amount == 0 || tokenA == tokenB) {
             return;
         }
